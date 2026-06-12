@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { Plus, X, Layers, Weight, ArrowUpRight, CheckCircle, PackageOpen, HelpCircle } from 'lucide-react';
 
-export default function RacksGrid({ racks, onRefresh }) {
+export default function RacksGrid({ racks, onRefresh, userRole }) {
   const [selectedRack, setSelectedRack] = useState(null);
   const [rackContents, setRackContents] = useState([]);
   const [loadingContents, setLoadingContents] = useState(false);
@@ -104,10 +104,12 @@ export default function RacksGrid({ racks, onRefresh }) {
           <h2 style={styles.title}>Warehouse Racks Map</h2>
           <p style={styles.subtitle}>Click any rack storage bay to view contents or retrieve stock</p>
         </div>
-        <button onClick={() => setShowAddRack(true)} className="btn btn-primary">
-          <Plus size={18} />
-          <span>Add New Rack</span>
-        </button>
+        {userRole === 'admin' && (
+          <button onClick={() => setShowAddRack(true)} className="btn btn-primary">
+            <Plus size={18} />
+            <span>Add New Rack</span>
+          </button>
+        )}
       </div>
 
       <div style={styles.layoutWrapper}>
@@ -228,27 +230,33 @@ export default function RacksGrid({ racks, onRefresh }) {
                         </div>
                       </div>
 
-                      <div style={styles.retrievalControls}>
-                        <input
-                          type="number"
-                          min="1"
-                          max={item.quantity}
-                          value={retrievalQty[item.product_id] || 1}
-                          onChange={(e) => setRetrievalQty({
-                            ...retrievalQty,
-                            [item.product_id]: Math.min(item.quantity, Math.max(1, parseInt(e.target.value) || 1))
-                          })}
-                          className="form-input"
-                          style={styles.retrievalInput}
-                        />
-                        <button
-                          onClick={() => handleRetrieve(item.product_code, retrievalQty[item.product_id] || 1)}
-                          className="btn btn-danger"
-                          style={styles.retrievalBtn}
-                        >
-                          Retrieve
-                        </button>
-                      </div>
+                      {userRole === 'admin' || userRole === 'supervisor' ? (
+                        <div style={styles.retrievalControls}>
+                          <input
+                            type="number"
+                            min="1"
+                            max={item.quantity}
+                            value={retrievalQty[item.product_id] || 1}
+                            onChange={(e) => setRetrievalQty({
+                              ...retrievalQty,
+                              [item.product_id]: Math.min(item.quantity, Math.max(1, parseInt(e.target.value) || 1))
+                            })}
+                            className="form-input"
+                            style={styles.retrievalInput}
+                          />
+                          <button
+                            onClick={() => handleRetrieve(item.product_code, retrievalQty[item.product_id] || 1)}
+                            className="btn btn-danger"
+                            style={styles.retrievalBtn}
+                          >
+                            Retrieve
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-glass)', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Read-Only Location
+                        </div>
+                      )}
                     </div>
                   ))
                 )}

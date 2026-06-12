@@ -5,9 +5,15 @@ import Scanner from './components/Scanner';
 import Allocation from './components/Allocation';
 import RacksGrid from './components/RacksGrid';
 import Inventory from './components/Inventory';
+import Login from './components/Login';
+import UsersManager from './components/UsersManager';
 import { api } from './utils/api';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('invento_user');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [currentView, setCurrentView] = useState('dashboard');
   
   // Global States
@@ -54,8 +60,22 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (currentUser) {
+      loadData();
+    }
+  }, [currentUser]);
+
+  const handleLogin = (username, role) => {
+    const user = { username, role };
+    setCurrentUser(user);
+    localStorage.setItem('invento_user', JSON.stringify(user));
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('invento_user');
+    setCurrentView('dashboard');
+  };
 
   const handleProductScanned = (product, quantity) => {
     setSelectedProduct(product);
@@ -80,13 +100,22 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  if (!currentUser) {
+    return <Login onLoginSuccess={handleLogin} />;
+  }
+
   return (
     <div className="app-container">
-      <Header currentView={currentView} onViewChange={(view) => {
-        // Clear active scan if navigating away
-        setSelectedProduct(null);
-        setCurrentView(view);
-      }} />
+      <Header 
+        currentView={currentView} 
+        onViewChange={(view) => {
+          // Clear active scan if navigating away
+          setSelectedProduct(null);
+          setCurrentView(view);
+        }}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
 
       <main className="main-content">
         {loading && !stats.total_racks_count ? (
@@ -121,16 +150,20 @@ export default function App() {
                   onAllocationSuccess={handleAllocationSuccess}
                 />
               ) : (
-                <Scanner onProductScanned={handleProductScanned} />
+                <Scanner onProductScanned={handleProductScanned} userRole={currentUser.role} />
               )
             )}
             
             {currentView === 'racks' && (
-              <RacksGrid racks={racks} onRefresh={loadData} />
+              <RacksGrid racks={racks} onRefresh={loadData} userRole={currentUser.role} />
             )}
             
             {currentView === 'inventory' && (
-              <Inventory products={products} onRefresh={loadData} />
+              <Inventory products={products} onRefresh={loadData} userRole={currentUser.role} />
+            )}
+            
+            {currentView === 'users' && (currentUser.role === 'admin' || currentUser.role === 'supervisor') && (
+              <UsersManager currentUser={currentUser} />
             )}
           </>
         )}

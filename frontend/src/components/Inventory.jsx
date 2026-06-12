@@ -1,11 +1,24 @@
 import React, { useState } from 'react';
 import { api } from '../utils/api';
-import { Search, Filter, Plus, Package, Layers, X, CheckCircle } from 'lucide-react';
+import { Search, Filter, Plus, Package, Layers, X, CheckCircle, Trash2 } from 'lucide-react';
 
-export default function Inventory({ products, onRefresh }) {
+export default function Inventory({ products, onRefresh, userRole }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [showAddForm, setShowAddForm] = useState(false);
+
+  const handleDeleteProduct = async (productId) => {
+    if (!window.confirm("Are you sure you want to delete this product? This will remove its definition and clear all of its stock from all racks!")) {
+      return;
+    }
+    
+    try {
+      await api.deleteProduct(productId);
+      onRefresh();
+    } catch (err) {
+      alert(err.message || 'Failed to delete product');
+    }
+  };
   
   // Form state
   const [newProduct, setNewProduct] = useState({
@@ -35,8 +48,45 @@ export default function Inventory({ products, onRefresh }) {
     e.preventDefault();
     setFormError(null);
     setFormSuccess(false);
+
+    const barcodeTrimmed = newProduct.product_code.trim();
+    const nameTrimmed = newProduct.name.trim();
+
+    if (!barcodeTrimmed || barcodeTrimmed.length < 3) {
+      setFormError('Barcode/SKU must be at least 3 characters long.');
+      return;
+    }
+
+    if (!nameTrimmed || nameTrimmed.length < 3) {
+      setFormError('Product name must be at least 3 characters long.');
+      return;
+    }
+
+    // Check if barcode is unique
+    const barcodeExists = products.some(
+      p => p.product_code.toLowerCase() === barcodeTrimmed.toLowerCase()
+    );
+    if (barcodeExists) {
+      setFormError(`Barcode '${barcodeTrimmed}' is already registered to another product template.`);
+      return;
+    }
+
+    if (parseFloat(newProduct.weight) <= 0) {
+      setFormError('Product weight must be greater than 0 kg.');
+      return;
+    }
+
+    if (parseFloat(newProduct.height) <= 0 || parseFloat(newProduct.width) <= 0 || parseFloat(newProduct.length) <= 0) {
+      setFormError('Dimensions (Height, Width, Length) must be greater than 0 cm.');
+      return;
+    }
+
     try {
-      await api.createProduct(newProduct);
+      await api.createProduct({
+        ...newProduct,
+        product_code: barcodeTrimmed,
+        name: nameTrimmed
+      });
       setFormSuccess(true);
       setNewProduct({
         product_code: '',
@@ -70,10 +120,12 @@ export default function Inventory({ products, onRefresh }) {
           <h2 style={styles.title}>Product Catalog</h2>
           <p style={styles.subtitle}>View physical dimensions, weight records, and stock distributions</p>
         </div>
-        <button onClick={() => setShowAddForm(true)} className="btn btn-primary">
-          <Plus size={18} />
-          <span>New Product Template</span>
-        </button>
+        {userRole !== 'user' && (
+          <button onClick={() => setShowAddForm(true)} className="btn btn-primary">
+            <Plus size={18} />
+            <span>New Product Template</span>
+          </button>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -125,6 +177,7 @@ export default function Inventory({ products, onRefresh }) {
                   <th>Volume</th>
                   <th>Weight</th>
                   <th>Stock Count</th>
+                  {userRole !== 'user' && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -150,6 +203,30 @@ export default function Inventory({ products, onRefresh }) {
                         {p.quantity} units
                       </span>
                     </td>
+                    {userRole !== 'user' && (
+                      <td>
+                        <button
+                          onClick={() => handleDeleteProduct(p.id)}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.05)',
+                            border: '1px solid rgba(239, 68, 68, 0.15)',
+                            color: '#ef4444',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '11px',
+                            transition: 'all 0.2s ease'
+                          }}
+                          title="Delete Product Template"
+                        >
+                          <Trash2 size={12} />
+                          <span>Delete</span>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

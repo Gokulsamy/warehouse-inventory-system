@@ -5,12 +5,13 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from .database import get_db, Base, engine, SessionLocal
-from .models import Product, Rack, StockMovement, AllocationHistory
+from .models import Product, Rack, StockMovement, AllocationHistory, User
 from .schemas import (
     ProductCreate, ProductResponse,
     RackCreate, RackResponse,
     AllocationRequest, AllocationResult, ConfirmAllocationRequest, RackRecommendation,
-    DashboardStats, StockMovementResponse
+    DashboardStats, StockMovementResponse,
+    UserLoginRequest, UserCreateRequest, UserResponse
 )
 from .allocation import get_heuristic_recommendations
 from .ml_module import ml_manager
@@ -32,13 +33,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Startup event to train ML models
+# Startup event to train ML models & seed default users
 @app.on_event("startup")
 def startup_event():
     db = SessionLocal()
     try:
         print("Training ML Models on startup...")
         ml_manager.train_models(db)
+        
+        # Seed default users
+        default_users = [
+            {"username": "admin", "password": "admin123", "role": "admin", "email": "admin@invento.ai", "contact": "+1-555-0100"},
+            {"username": "supervisor", "password": "super123", "role": "supervisor", "email": "supervisor@invento.ai", "contact": "+1-555-0122"},
+            {"username": "user", "password": "user123", "role": "user", "email": "operator@invento.ai", "contact": "+1-555-0144"}
+        ]
+        for u_data in default_users:
+            existing = db.query(User).filter(User.username == u_data["username"]).first()
+            if not existing:
+                new_u = User(
+                    username=u_data["username"],
+                    password=u_data["password"],
+                    role=u_data["role"],
+                    email=u_data["email"],
+                    contact=u_data["contact"]
+                )
+                db.add(new_u)
+            else:
+                existing.email = u_data["email"]
+                existing.contact = u_data["contact"]
+        db.commit()
+        print("Default users seeded successfully with emails/contacts.")
     finally:
         db.close()
 
@@ -84,6 +108,37 @@ def create_product(product_in: ProductCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_product)
     return new_product
+
+@app.delete("/api/v1/products/{product_id}")
+def delete_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    # Get all movements to see which racks contain this product
+    movements = db.query(StockMovement).filter(StockMovement.product_id == product_id).all()
+    rack_qtys = {}
+    for m in movements:
+        if m.type == "IN":
+            rack_qtys[m.rack_id] = rack_qtys.get(m.rack_id, 0) + m.quantity
+        elif m.type == "OUT":
+            rack_qtys[m.rack_id] = max(0, rack_qtys.get(m.rack_id, 0) - m.quantity)
+            
+    # Subtract volume and weight from each rack
+    prod_vol = product.height * product.width * product.length
+    for rack_id, qty in rack_qtys.items():
+        if qty > 0:
+            rack = db.query(Rack).filter(Rack.id == rack_id).first()
+            if rack:
+                rack.occupied_volume = max(0.0, rack.occupied_volume - (prod_vol * qty))
+                rack.current_weight = max(0.0, rack.current_weight - (product.weight * qty))
+                
+    # Delete movements, history, and product
+    db.query(StockMovement).filter(StockMovement.product_id == product_id).delete()
+    db.query(AllocationHistory).filter(AllocationHistory.product_id == product_id).delete()
+    db.delete(product)
+    db.commit()
+    return {"message": f"Successfully removed product '{product.name}' from catalog and racks."}
 
 # ----------------- Racks API -----------------
 
@@ -348,3 +403,55 @@ def get_future_utilization(days: int = 7, db: Session = Depends(get_db)):
         "total_volume_capacity": total_capacity,
         "predictions": predictions
     }
+
+# ----------------- Authentication and User Management API -----------------
+
+@app.post("/api/v1/auth/login", response_model=UserResponse)
+def login(req: UserLoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == req.username.lower()).first()
+    if not user or user.password != req.password:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    return user
+
+@app.post("/api/v1/auth/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(user_in: UserCreateRequest, requester_role: str, db: Session = Depends(get_db)):
+    if requester_role != "admin":
+        raise HTTPException(status_code=403, detail="Only administrators can create users.")
+    
+    existing = db.query(User).filter(User.username == user_in.username.lower()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists.")
+        
+    new_u = User(
+        username=user_in.username.lower(),
+        password=user_in.password,
+        role=user_in.role,
+        email=user_in.email,
+        contact=user_in.contact
+    )
+    db.add(new_u)
+    db.commit()
+    db.refresh(new_u)
+    return new_u
+
+@app.get("/api/v1/auth/users", response_model=List[UserResponse])
+def get_users(requester_role: str, db: Session = Depends(get_db)):
+    if requester_role == "admin":
+        return db.query(User).all()
+    elif requester_role == "supervisor":
+        return db.query(User).filter(User.role == "user").all()
+    else:
+        raise HTTPException(status_code=403, detail="Only administrators and supervisors can view user directory.")
+
+@app.delete("/api/v1/auth/users/{user_id}")
+def delete_user(user_id: int, requester_role: str, db: Session = Depends(get_db)):
+    if requester_role != "admin":
+        raise HTTPException(status_code=403, detail="Only administrators can delete users.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.username == "admin":
+        raise HTTPException(status_code=400, detail="Cannot delete the default administrator account.")
+    db.delete(user)
+    db.commit()
+    return {"message": f"Successfully deleted user '{user.username}'."}

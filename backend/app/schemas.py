@@ -1,4 +1,5 @@
-from pydantic import BaseModel, ConfigDict
+import re
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import List, Optional
 from datetime import datetime
 
@@ -92,3 +93,64 @@ class DashboardStats(BaseModel):
     overall_volume_utilization: float  # Percentage
     overall_weight_utilization: float  # Percentage
     recent_movements: List[StockMovementResponse]
+
+# User Schemas
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: str
+    email: Optional[str] = None
+    contact: Optional[str] = None
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        username = v.strip()
+        if len(username) < 3 or len(username) > 20:
+            raise ValueError("Username must be between 3 and 20 characters.")
+        if not re.match(r"^[a-zA-Z0-9_]+$", username):
+            raise ValueError("Username can only contain letters, numbers, and underscores.")
+        return username
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters long.")
+        return v
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if not v or v.strip() == "":
+            return None
+        email = v.strip()
+        if not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+            raise ValueError("Please enter a valid email address.")
+        return email
+
+    @field_validator("contact")
+    @classmethod
+    def validate_contact(cls, v: Optional[str]) -> Optional[str]:
+        if not v or v.strip() == "":
+            return None
+        contact = v.strip()
+        if not re.match(r"^\+?[\d\s\-()]+$", contact):
+            raise ValueError("Phone number can only contain digits, spaces, hyphens, parentheses, and an optional leading +.")
+        digits = re.sub(r"\D", "", contact)
+        if len(digits) < 7 or len(digits) > 15:
+            raise ValueError("Phone number must contain between 7 and 15 digits.")
+        return contact
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+    email: Optional[str] = None
+    contact: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)

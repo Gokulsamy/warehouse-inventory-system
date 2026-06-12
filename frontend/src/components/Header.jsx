@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, ScanLine, Grid, Box, Clock } from 'lucide-react';
+import { LayoutDashboard, ScanLine, Grid, Box, Clock, LogOut, Users } from 'lucide-react';
 
-export default function Header({ currentView, onViewChange }) {
+export default function Header({ currentView, onViewChange, currentUser, onLogout }) {
   const [time, setTime] = useState(new Date());
 
-
-
-  
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -22,6 +19,12 @@ export default function Header({ currentView, onViewChange }) {
     { id: 'racks', label: 'Racks Map', icon: Grid },
     { id: 'inventory', label: 'Inventory', icon: Box },
   ];
+
+  if (currentUser && currentUser.role === 'admin') {
+    navItems.push({ id: 'users', label: 'Users', icon: Users });
+  } else if (currentUser && currentUser.role === 'supervisor') {
+    navItems.push({ id: 'users', label: 'Operator Directory', icon: Users });
+  }
 
   return (
     <header style={styles.header}>
@@ -54,9 +57,23 @@ export default function Header({ currentView, onViewChange }) {
         })}
       </nav>
 
-      <div style={styles.clockContainer}>
-        <Clock size={16} color="#6366f1" />
-        <span style={styles.clockText}>{formatTime(time)}</span>
+      <div style={styles.rightContainer}>
+        <div style={styles.clockContainer}>
+          <Clock size={16} color="#6366f1" />
+          <span style={styles.clockText}>{formatTime(time)}</span>
+        </div>
+
+        {currentUser && (
+          <div style={styles.userContainer}>
+            <div style={styles.userBadge(currentUser.role)}>
+              <span style={styles.roleLabel}>{currentUser.role}</span>
+              <span style={styles.usernameText}>@{currentUser.username}</span>
+            </div>
+            <button onClick={onLogout} style={styles.logoutBtn} title="Logout">
+              <LogOut size={16} color="#ef4444" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
@@ -154,6 +171,61 @@ const styles = {
     fontFamily: 'monospace',
     color: 'var(--text-primary)',
     letterSpacing: '0.5px',
+  },
+  rightContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+  },
+  userContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  userBadge: (role) => {
+    let bg = 'rgba(239, 68, 68, 0.1)';
+    let color = '#ef4444';
+    if (role === 'supervisor') {
+      bg = 'rgba(245, 158, 11, 0.1)';
+      color = '#f59e0b';
+    } else if (role === 'user') {
+      bg = 'rgba(37, 99, 235, 0.1)';
+      color = '#2563eb';
+    }
+    return {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '6px 12px',
+      borderRadius: '8px',
+      border: `1px solid ${color}30`,
+      background: bg,
+      color: color,
+      fontSize: '12px',
+      fontWeight: '600',
+    };
+  },
+  roleLabel: {
+    textTransform: 'uppercase',
+    fontSize: '9px',
+    background: 'rgba(255, 255, 255, 0.2)',
+    padding: '2px 6px',
+    borderRadius: '4px',
+    letterSpacing: '0.5px',
+  },
+  usernameText: {
+    fontWeight: '700',
+  },
+  logoutBtn: {
+    background: 'rgba(239, 68, 68, 0.05)',
+    border: '1px solid rgba(239, 68, 68, 0.15)',
+    borderRadius: '8px',
+    padding: '8px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.2s ease',
   },
 };
 

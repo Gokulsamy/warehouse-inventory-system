@@ -68,3 +68,13 @@ class AllocationHistory(Base):
     # Relationships
     product = relationship("Product", back_populates="allocations")
     rack = relationship("Rack", back_populates="allocations")
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    password = Column(String(100), nullable=False)
+    role = Column(String(50), nullable=False)
+    email = Column(String(100), nullable=True)
+    contact = Column(String(50), nullable=True)

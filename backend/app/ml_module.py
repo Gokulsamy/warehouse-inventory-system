@@ -6,56 +6,63 @@ from .models import Product, Rack, StockMovement, AllocationHistory
 
 class PurePythonKNNClassifier:
     """
-    Pure Python K-Nearest Neighbors Classifier.
-    Requires no external C/C++ compilation.
+    Pure Python K-Nearest Neighbors Classifier with Z-Score normalization.
     """
     def __init__(self, k: int = 5):
         self.k = k
         self.X_train: List[Dict[str, Any]] = []
         self.y_train: List[str] = []
+        self.means: Dict[str, float] = {}
+        self.stds: Dict[str, float] = {}
 
     def fit(self, features: List[Dict[str, Any]], targets: List[str]):
         self.X_train = features
         self.y_train = targets
 
+        if not features:
+            return
+
+        # Calculate mean and std for each numerical key
+        keys = ["weight", "volume", "height", "width", "length"]
+        n = len(features)
+        
+        for key in keys:
+            vals = [item[key] for item in features]
+            mean = sum(vals) / n
+            var = sum((x - mean) ** 2 for x in vals) / n
+            std = math.sqrt(var)
+            
+            self.means[key] = mean
+            self.stds[key] = std if std > 1e-5 else 1.0 # Avoid division by zero
+
     def _calculate_distance(self, p1: Dict[str, Any], p2: Dict[str, Any]) -> float:
-        # Features: weight, volume, height, width, length, category_match
-        # Normalize features roughly to ensure balanced distance weights
-        d_weight = (p1["weight"] - p2["weight"]) / 50.0
-        d_volume = (p1["volume"] - p2["volume"]) / 1000000.0
-        d_height = (p1["height"] - p2["height"]) / 200.0
-        d_width = (p1["width"] - p2["width"]) / 200.0
-        d_length = (p1["length"] - p2["length"]) / 300.0
+        dist_sq = 0.0
+        for key in ["weight", "volume", "height", "width", "length"]:
+            mean = self.means.get(key, 0.0)
+            std = self.stds.get(key, 1.0)
+            v1 = (p1[key] - mean) / std
+            v2 = (p2[key] - mean) / std
+            dist_sq += (v1 - v2) ** 2
+            
+        # Category distance (weight category mismatch heavily)
+        d_cat = 0.0 if p1["category"] == p2["category"] else 1.5
+        dist_sq += d_cat ** 2
         
-        # Category distance: 0 if same, 1 if different
-        d_cat = 0.0 if p1["category"] == p2["category"] else 1.0
-        
-        return math.sqrt(
-            d_weight**2 + 
-            d_volume**2 + 
-            d_height**2 + 
-            d_width**2 + 
-            d_length**2 + 
-            d_cat**2
-        )
+        return math.sqrt(dist_sq)
 
     def predict(self, x: Dict[str, Any]) -> str:
         if not self.X_train:
             return "Standard"
             
-        # Compute distances to all training points
+        # Compute distances
         distances = []
         for train_x, train_y in zip(self.X_train, self.y_train):
             dist = self._calculate_distance(x, train_x)
             distances.append((dist, train_y))
             
-        # Sort by distance
         distances.sort(key=lambda item: item[0])
-        
-        # Get labels of top K
         top_k_labels = [label for _, label in distances[:self.k]]
         
-        # Find majority vote
         votes = {}
         for label in top_k_labels:
             votes[label] = votes.get(label, 0) + 1
@@ -64,47 +71,90 @@ class PurePythonKNNClassifier:
         return sorted_votes[0][0]
 
 
-class PurePythonLinearRegression:
+def solve_linear_system(A: List[List[float]], B: List[float]) -> List[float]:
     """
-    Pure Python Simple Linear Regression (y = m * x + c).
-    Uses Ordinary Least Squares (OLS).
+    Solves a system of linear equations A * x = B using Gaussian elimination.
+    """
+    n = len(B)
+    M = [A[i] + [B[i]] for i in range(n)]
+    
+    for i in range(n):
+        pivot_row = i
+        for r in range(i + 1, n):
+            if abs(M[r][i]) > abs(M[pivot_row][i]):
+                pivot_row = r
+        M[i], M[pivot_row] = M[pivot_row], M[i]
+        
+        pivot = M[i][i]
+        if abs(pivot) < 1e-9:
+            continue
+        for c in range(i, n + 1):
+            M[i][c] /= pivot
+            
+        for r in range(n):
+            if r != i:
+                factor = M[r][i]
+                for c in range(i, n + 1):
+                    M[r][c] -= factor * M[i][c]
+                    
+    return [M[i][n] for i in range(n)]
+
+
+class PurePythonHarmonicRegression:
+    """
+    Pure Python Multiple Linear Regression with weekly seasonality harmonic wave modeling:
+    y = beta_0 + beta_1 * t + beta_2 * sin(2*pi*t/7) + beta_3 * cos(2*pi*t/7)
+    Uses OLS solved via Gaussian Elimination.
     """
     def __init__(self):
-        self.slope: float = 0.0
-        self.intercept: float = 0.0
+        self.coefficients: List[float] = [0.0, 0.0, 0.0, 0.0]
+        self.trained: bool = False
 
-    def fit(self, x: List[float], y: List[float]):
-        n = len(x)
-        if n < 2:
-            # Fallback if too few data points
-            self.slope = 0.0
-            self.intercept = sum(y) / max(1, n)
+    def fit(self, t: List[float], y: List[float]):
+        n = len(t)
+        if n < 4:
+            mean_y = sum(y) / max(1, n)
+            self.coefficients = [mean_y, 0.0, 0.0, 0.0]
+            self.trained = True
             return
 
-        mean_x = sum(x) / n
-        mean_y = sum(y) / n
+        A = [[0.0] * 4 for _ in range(4)]
+        B = [0.0] * 4
 
-        numerator = 0.0
-        denominator = 0.0
-        for xi, yi in zip(x, y):
-            numerator += (xi - mean_x) * (yi - mean_y)
-            denominator += (xi - mean_x) ** 2
+        for ti, yi in zip(t, y):
+            x = [
+                1.0,
+                ti,
+                math.sin(2 * math.pi * ti / 7.0),
+                math.cos(2 * math.pi * ti / 7.0)
+            ]
+            for r in range(4):
+                for c in range(4):
+                    A[r][c] += x[r] * x[c]
+                B[r] += x[r] * yi
 
-        if denominator == 0:
-            self.slope = 0.0
-            self.intercept = mean_y
-        else:
-            self.slope = numerator / denominator
-            self.intercept = mean_y - (self.slope * mean_x)
+        try:
+            self.coefficients = solve_linear_system(A, B)
+            self.trained = True
+        except Exception:
+            mean_y = sum(y) / n
+            self.coefficients = [mean_y, 0.0, 0.0, 0.0]
+            self.trained = True
 
-    def predict(self, x_val: float) -> float:
-        return (self.slope * x_val) + self.intercept
+    def predict(self, t_val: float) -> float:
+        intercept, trend, sin_coeff, cos_coeff = self.coefficients
+        return (
+            intercept +
+            (trend * t_val) +
+            (sin_coeff * math.sin(2 * math.pi * t_val / 7.0)) +
+            (cos_coeff * math.cos(2 * math.pi * t_val / 7.0))
+        )
 
 
 class WarehouseMLManager:
     def __init__(self):
         self.zone_classifier = PurePythonKNNClassifier(k=5)
-        self.utilization_regressor = PurePythonLinearRegression()
+        self.utilization_regressor = PurePythonHarmonicRegression()
         self.is_classifier_trained = False
         self.is_regressor_trained = False
         

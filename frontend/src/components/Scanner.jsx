@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { Camera, RefreshCw, Barcode, HelpCircle, PackageOpen, ChevronRight } from 'lucide-react';
+import { Camera, RefreshCw, Barcode, HelpCircle, PackageOpen, ChevronRight, Shield } from 'lucide-react';
 import { api } from '../utils/api';
 
-export default function Scanner({ onProductScanned }) {
+export default function Scanner({ onProductScanned, userRole }) {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -24,6 +24,30 @@ export default function Scanner({ onProductScanned }) {
   });
 
   const scannerRef = useRef(null);
+
+  // If the user role is 'supervisor', restrict access to scanner controls
+  if (userRole === 'supervisor') {
+    return (
+      <div style={styles.container}>
+        <div className="glass-panel" style={{ ...styles.scannerPanel, justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '40px' }}>
+          <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '24px', borderRadius: '16px', maxWidth: '450px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <span style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', padding: '8px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Shield size={32} />
+              </span>
+            </div>
+            <h3 style={{ color: 'var(--text-primary)', fontSize: '18px', fontWeight: '700' }}>Supervisor Mode (Read-Only Scanner)</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '10px', lineHeight: '1.5' }}>
+              Your account has supervisor access. Barcode scanning and inventory allocation features are restricted to Operator and Administrator roles.
+            </p>
+            <p style={{ color: '#6b7280', fontSize: '12px', marginTop: '8px' }}>
+              Please switch to an Operator or Administrator account if you need to perform allocations.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     let scanner = null;

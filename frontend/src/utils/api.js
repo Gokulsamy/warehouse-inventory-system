@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 async function handleResponse(response) {
   if (!response.ok) {
@@ -96,6 +96,48 @@ export const api = {
   // Fetch ML 7-day space utilization projections
   async getFutureUtilization(days = 7) {
     const res = await fetch(`${API_BASE_URL}/analytics/future-utilization?days=${days}`);
+    return handleResponse(res);
+  },
+
+  // Delete product definition and clear from racks
+  async deleteProduct(productId) {
+    const res = await fetch(`${API_BASE_URL}/products/${productId}`, {
+      method: 'DELETE'
+    });
+    return handleResponse(res);
+  },
+
+  // Authenticate user credentials
+  async login(username, password) {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    return handleResponse(res);
+  },
+
+  // Fetch list of users (admin only)
+  async getUsers(requesterRole) {
+    const res = await fetch(`${API_BASE_URL}/auth/users?requester_role=${requesterRole}`);
+    return handleResponse(res);
+  },
+
+  // Create a new user (admin only)
+  async createUser(userData, requesterRole) {
+    const res = await fetch(`${API_BASE_URL}/auth/users?requester_role=${requesterRole}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData)
+    });
+    return handleResponse(res);
+  },
+
+  // Delete a user (admin only)
+  async deleteUser(userId, requesterRole) {
+    const res = await fetch(`${API_BASE_URL}/auth/users/${userId}?requester_role=${requesterRole}`, {
+      method: 'DELETE'
+    });
     return handleResponse(res);
   }
 };
