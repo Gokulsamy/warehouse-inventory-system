@@ -10,10 +10,7 @@ import UsersManager from './components/UsersManager';
 import { api } from './utils/api';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(() => {
-    const saved = localStorage.getItem('invento_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [currentUser, setCurrentUser] = useState(null);
   const [currentView, setCurrentView] = useState('dashboard');
   
   // Global States
@@ -68,12 +65,10 @@ export default function App() {
   const handleLogin = (username, role) => {
     const user = { username, role };
     setCurrentUser(user);
-    localStorage.setItem('invento_user', JSON.stringify(user));
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('invento_user');
     setCurrentView('dashboard');
   };
 
