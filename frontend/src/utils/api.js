@@ -86,7 +86,7 @@ export const api = {
 
   // Retrieve/extract stock from rack
   async retrieveStock(productCode, rackCode, quantity) {
-    const res = await fetch(`${API_BASE_URL}/inventory/retrieve?product_code=${productCode}&rack_code=${rack_code}&quantity=${parseInt(quantity)}`, {
+    const res = await fetch(`${API_BASE_URL}/inventory/retrieve?product_code=${productCode}&rack_code=${rackCode}&quantity=${parseInt(quantity)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
@@ -146,6 +146,17 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
     const res = await fetch(`${API_BASE_URL}/products/upload-csv`, {
+      method: 'POST',
+      body: formData
+    });
+    return handleResponse(res);
+  },
+
+  // Upload bulk products and allocate them to racks (CSV or Excel)
+  async uploadProductsAllocate(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/products/upload-allocate`, {
       method: 'POST',
       body: formData
     });

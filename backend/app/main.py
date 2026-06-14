@@ -1,4 +1,4 @@
-import os
+﻿import os
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -533,3 +533,234 @@ def upload_products_csv(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Internal server error parsing CSV: {str(e)}")
+
+
+
+@app.post("/api/v1/products/upload-allocate")
+def upload_products_allocate(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Accepts CSV (.csv) or Excel (.xlsx/.xls) files.
+    Required columns: product_code, name, category, height, width, length, weight, quantity
+    - Validates ALL required columns are present (reports exactly which are missing).
+    - Validates every row field (empty check + numeric check + positive check).
+    - Uses all-or-nothing DB transaction: nothing is saved if any row fails.
+    - Allocates each product to the best available rack using heuristic + ML scoring.
+    """
+    import csv
+    import io
+    from io import StringIO
+
+    # â”€â”€ Step 1: File extension check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    filename = (file.filename or "").strip().lower()
+    is_csv   = filename.endswith(".csv")
+    is_excel = filename.endswith(".xlsx") or filename.endswith(".xls")
+
+    if not (is_csv or is_excel):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file format. Please upload a .csv, .xlsx, or .xls file."
+        )
+
+    REQUIRED_COLUMNS = ["product_code", "name", "category", "height", "width", "length", "weight", "quantity"]
+
+    try:
+        # â”€â”€ Step 2: Read and parse file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        file_bytes = file.file.read()
+
+        if is_csv:
+            try:
+                contents = file_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                contents = file_bytes.decode("latin-1")
+            csv_reader  = csv.DictReader(StringIO(contents))
+            raw_headers = [h.strip().lower() for h in (csv_reader.fieldnames or [])]
+            rows        = [{k.strip().lower(): v for k, v in row.items()} for row in csv_reader]
+
+        else:  # Excel
+            try:
+                import pandas as pd
+            except ImportError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="pandas is not installed on the server. Cannot process Excel files."
+                )
+            df          = pd.read_excel(io.BytesIO(file_bytes))
+            df.columns  = [str(c).strip().lower() for c in df.columns]
+            df          = df.fillna("")
+            raw_headers = list(df.columns)
+            rows        = df.to_dict(orient="records")
+
+        # â”€â”€ Step 3: Column validation â€” report ALL missing columns â”€â”€â”€â”€â”€â”€â”€â”€
+        missing_cols = [col for col in REQUIRED_COLUMNS if col not in raw_headers]
+        if missing_cols:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Your file is missing {len(missing_cols)} required column(s): "
+                    f"{', '.join(missing_cols)}. "
+                    f"All required columns are: {', '.join(REQUIRED_COLUMNS)}."
+                )
+            )
+
+        if not rows:
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded file has no data rows. Please add at least one product row."
+            )
+
+        # â”€â”€ Step 4: Load racks once â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        racks = db.query(Rack).all()
+        if not racks:
+            raise HTTPException(
+                status_code=400,
+                detail="No racks found in the warehouse. Please add racks before uploading products."
+            )
+
+        allocations_report = []
+        products_allocated  = 0
+
+        # â”€â”€ Step 5: Process every row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        for index, row in enumerate(rows, start=1):
+            # 5a. Empty value check for every required column
+            for col in REQUIRED_COLUMNS:
+                val = row.get(col)
+                if val is None or str(val).strip() == "":
+                    raise ValueError(f"Row {index}: Column '{col}' is empty. Please provide a value.")
+
+            # 5b. Normalise product_code (pandas reads ints as floats e.g. 880101.0 â†’ "880101")
+            raw_pc = row["product_code"]
+            if isinstance(raw_pc, float) and raw_pc == int(raw_pc):
+                product_code = str(int(raw_pc))
+            else:
+                product_code = str(raw_pc).strip()
+                if product_code.endswith(".0"):
+                    try:
+                        product_code = str(int(float(product_code)))
+                    except ValueError:
+                        pass
+
+            if not product_code:
+                raise ValueError(f"Row {index}: 'product_code' cannot be empty.")
+
+            name     = str(row["name"]).strip()
+            category = str(row["category"]).strip()
+
+            if not name:
+                raise ValueError(f"Row {index}: 'name' cannot be empty.")
+            if not category:
+                raise ValueError(f"Row {index}: 'category' cannot be empty.")
+
+            # 5c. Numeric validation
+            try:
+                height   = float(row["height"])
+                width    = float(row["width"])
+                length   = float(row["length"])
+                weight   = float(row["weight"])
+                qty_raw  = row["quantity"]
+                quantity = int(float(qty_raw)) if isinstance(qty_raw, str) else int(qty_raw)
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"Row {index}: 'height', 'width', 'length', 'weight', and 'quantity' must be valid numbers. "
+                    f"Got height={row.get('height')}, width={row.get('width')}, "
+                    f"length={row.get('length')}, weight={row.get('weight')}, quantity={row.get('quantity')}."
+                )
+
+            if height <= 0 or width <= 0 or length <= 0:
+                raise ValueError(f"Row {index}: 'height', 'width', and 'length' must all be greater than 0.")
+            if weight <= 0:
+                raise ValueError(f"Row {index}: 'weight' must be greater than 0.")
+            if quantity <= 0:
+                raise ValueError(f"Row {index}: 'quantity' must be a positive integer greater than 0.")
+
+            # 5d. Upsert product
+            product = db.query(Product).filter(Product.product_code == product_code).first()
+            if not product:
+                product = Product(
+                    product_code=product_code,
+                    name=name,
+                    category=category,
+                    height=height,
+                    width=width,
+                    length=length,
+                    weight=weight,
+                    volume=height * width * length,
+                    quantity=0
+                )
+                db.add(product)
+                db.flush()  # Assign product.id before creating movements
+
+            # 5e. Find best rack (heuristic + ML)
+            heuristics     = get_heuristic_recommendations(product, quantity, racks)
+            predicted_zone = ml_manager.predict_best_zone(product, quantity)
+
+            compatible = []
+            for rec in heuristics:
+                if rec["fits"]:
+                    rack_obj = next((r for r in racks if r.id == rec["rack_id"]), None)
+                    if rack_obj:
+                        score  = rec["score"]
+                        source = "HEURISTIC"
+                        if rack_obj.zone == predicted_zone:
+                            score  = min(100.0, round(score + 15.0, 2))
+                            source = "ML"
+                        compatible.append({"rack_obj": rack_obj, "score": score, "source": source})
+
+            if not compatible:
+                raise ValueError(
+                    f"Row {index}: Product '{name}' (qty={quantity}) does not fit in any rack. "
+                    f"All racks are full or too small. Add more racks or reduce quantity."
+                )
+
+            best        = max(compatible, key=lambda x: x["score"])
+            best_rack   = best["rack_obj"]
+            best_source = best["source"]
+            best_score  = best["score"]
+
+            # 5f. Apply allocation to rack and product
+            prod_vol = product.height * product.width * product.length
+            best_rack.occupied_volume += prod_vol * quantity
+            best_rack.current_weight  += product.weight * quantity
+            product.quantity          += quantity
+
+            db.add(StockMovement(
+                product_id=product.id,
+                rack_id=best_rack.id,
+                quantity=quantity,
+                type="IN",
+                notes=f"Bulk file allocation. Source: {best_source} (score {best_score}%)"
+            ))
+            db.add(AllocationHistory(
+                product_id=product.id,
+                rack_id=best_rack.id,
+                quantity_allocated=quantity,
+                recommended_by=best_source,
+                successful=True
+            ))
+
+            allocations_report.append(
+                f"Row {index}: {quantity} x '{name}' â†’ Rack '{best_rack.code}' [{best_source}]"
+            )
+            products_allocated += 1
+
+        # â”€â”€ Step 6: All-or-nothing commit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        db.commit()
+
+        return {
+            "message": (
+                f"Successfully allocated {products_allocated} product(s) from uploaded file.\n"
+                + "\n".join(allocations_report)
+            )
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise  # Re-raise FastAPI HTTP errors as-is
+    except ValueError as val_err:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Unexpected server error: {str(e)}")
