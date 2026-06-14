@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -455,3 +455,81 @@ def delete_user(user_id: int, requester_role: str, db: Session = Depends(get_db)
     db.delete(user)
     db.commit()
     return {"message": f"Successfully deleted user '{user.username}'."}
+
+
+@app.post("/api/v1/products/upload-csv")
+def upload_products_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    import csv
+    from io import StringIO
+    
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload a CSV file.")
+        
+    try:
+        contents = file.file.read().decode("utf-8")
+        csv_reader = csv.DictReader(StringIO(contents))
+        
+        # Validate headers
+        required_headers = {"product_code", "name", "category", "height", "width", "length", "weight", "quantity"}
+        if not csv_reader.fieldnames or not required_headers.issubset(set(csv_reader.fieldnames)):
+            missing = required_headers - set(csv_reader.fieldnames or [])
+            raise ValueError(f"Missing required columns in CSV: {', '.join(missing)}")
+            
+        products_processed = 0
+        for index, row in enumerate(csv_reader, start=1):
+            # 1. Missing values check
+            for header in required_headers:
+                val = row.get(header)
+                if val is None or str(val).strip() == "":
+                    raise ValueError(f"Row {index}: Column '{header}' cannot be empty.")
+            
+            product_code = row["product_code"].strip()
+            name = row["name"].strip()
+            category = row["category"].strip()
+            
+            # 2. Number type casts and ranges validation
+            try:
+                height = float(row["height"])
+                width = float(row["width"])
+                length = float(row["length"])
+                weight = float(row["weight"])
+                quantity = int(row["quantity"])
+            except ValueError:
+                raise ValueError(f"Row {index}: Dimensions (height, width, length), weight, and quantity must be valid numbers.")
+                
+            if height <= 0 or width <= 0 or length <= 0 or weight <= 0 or quantity <= 0:
+                raise ValueError(f"Row {index}: Dimensions, weight, and quantity must be positive numbers greater than zero.")
+                
+            # 3. DB upsert logic
+            existing = db.query(Product).filter(Product.product_code == product_code).first()
+            if existing:
+                existing.quantity += quantity
+            else:
+                vol = height * width * length
+                new_product = Product(
+                    product_code=product_code,
+                    name=name,
+                    category=category,
+                    height=height,
+                    width=width,
+                    length=length,
+                    weight=weight,
+                    volume=vol,
+                    quantity=quantity
+                )
+                db.add(new_product)
+            products_processed += 1
+            
+        # Commit database transaction only if all rows parsed successfully
+        db.commit()
+        return {"message": f"Successfully imported {products_processed} products from CSV."}
+        
+    except ValueError as val_err:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Internal server error parsing CSV: {str(e)}")

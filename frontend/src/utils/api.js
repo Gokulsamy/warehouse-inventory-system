@@ -139,5 +139,16 @@ export const api = {
       method: 'DELETE'
     });
     return handleResponse(res);
+  },
+
+  // Upload bulk products from a CSV file
+  async uploadProductsCSV(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE_URL}/products/upload-csv`, {
+      method: 'POST',
+      body: formData
+    });
+    return handleResponse(res);
   }
 };

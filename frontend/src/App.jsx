@@ -145,7 +145,7 @@ export default function App() {
                   onAllocationSuccess={handleAllocationSuccess}
                 />
               ) : (
-                <Scanner onProductScanned={handleProductScanned} userRole={currentUser.role} />
+                <Scanner onProductScanned={handleProductScanned} userRole={currentUser.role} onRefresh={loadData} />
               )
             )}
             

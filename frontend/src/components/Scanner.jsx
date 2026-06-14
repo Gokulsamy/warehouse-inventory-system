@@ -3,12 +3,109 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { Camera, RefreshCw, Barcode, HelpCircle, PackageOpen, ChevronRight, Shield } from 'lucide-react';
 import { api } from '../utils/api';
 
-export default function Scanner({ onProductScanned, userRole }) {
+const parseCSV = (text) => {
+  const lines = text.split('\n');
+  if (lines.length < 2) throw new Error("CSV file must have a header row and at least one data row.");
+  
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+  
+  const requiredHeaders = ["product_code", "name", "category", "height", "width", "length", "weight", "quantity"];
+  const missing = requiredHeaders.filter(h => !headers.includes(h));
+  if (missing.length > 0) {
+    throw new Error(`CSV is missing required headers: ${missing.join(', ')}`);
+  }
+  
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    
+    const values = line.split(',').map(v => v.trim());
+    if (values.length < headers.length) {
+      throw new Error(`Row ${i + 1}: Incomplete data row (column mismatch).`);
+    }
+    
+    const rowObj = {};
+    headers.forEach((h, idx) => {
+      rowObj[h] = values[idx];
+    });
+    
+    if (!rowObj.product_code) throw new Error(`Row ${i + 1}: product_code cannot be empty.`);
+    if (!rowObj.name) throw new Error(`Row ${i + 1}: name cannot be empty.`);
+    if (!rowObj.category) throw new Error(`Row ${i + 1}: category cannot be empty.`);
+    
+    const height = parseFloat(rowObj.height);
+    const width = parseFloat(rowObj.width);
+    const length = parseFloat(rowObj.length);
+    const weight = parseFloat(rowObj.weight);
+    const quantity = parseInt(rowObj.quantity);
+    
+    if (isNaN(height) || isNaN(width) || isNaN(length) || isNaN(weight) || isNaN(quantity)) {
+      throw new Error(`Row ${i + 1}: Dimensions, weight, and quantity must be valid numbers.`);
+    }
+    if (height <= 0 || width <= 0 || length <= 0 || weight <= 0 || quantity <= 0) {
+      throw new Error(`Row ${i + 1}: Dimensions, weight, and quantity must be positive numbers greater than zero.`);
+    }
+    
+    rows.push(rowObj);
+  }
+  return rows;
+};
+
+export default function Scanner({ onProductScanned, userRole, onRefresh }) {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+
+  // CSV Upload States
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const [uploadSuccess, setUploadSuccess] = useState(null);
+
+  const handleCSVUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target.result;
+      
+      try {
+        parseCSV(text);
+      } catch (err) {
+        setUploadError(`[Frontend Validation Error] ${err.message}`);
+        setUploading(false);
+        e.target.value = null;
+        return;
+      }
+
+      try {
+        const result = await api.uploadProductsCSV(file);
+        setUploadSuccess(result.message);
+        if (onRefresh) {
+          onRefresh();
+        }
+      } catch (err) {
+        setUploadError(`[Backend Upload Error] ${err.message}`);
+      } finally {
+        setUploading(false);
+        e.target.value = null;
+      }
+    };
+
+    reader.onerror = () => {
+      setUploadError("Failed to read local file.");
+      setUploading(false);
+    };
+
+    reader.readAsText(file);
+  };
   
   // Registering new product state
   const [showRegisterForm, setShowRegisterForm] = useState(false);
@@ -343,6 +440,47 @@ export default function Scanner({ onProductScanned, userRole }) {
           <div style={styles.infoBox}>
             <p><strong>Note for evaluators:</strong> Seeding data maps items of specific weight and categories to respective zones so the AI recommendation system highlights optimal placements dynamically.</p>
           </div>
+        </div>
+      </div>
+
+      {/* Full-width Fallback: Bulk CSV Import */}
+      <div className="glass-panel" style={{ marginTop: '24px', padding: '24px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
+          <PackageOpen size={20} color="#10b981" />
+          <h3 style={styles.panelTitle}>Bulk CSV Fallback Import</h3>
+        </div>
+        <p style={styles.panelSubtitle}>
+          If webcam scanning is unavailable, upload a CSV template to bulk register products into catalog.
+        </p>
+
+        {uploadError && <div style={{ ...styles.errorAlert, marginTop: '0', marginBottom: '16px' }}>{uploadError}</div>}
+        {uploadSuccess && (
+          <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)', color: '#34d399', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
+            {uploadSuccess}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ flex: 1, minWidth: '280px' }}>
+            <p style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '6px' }}>
+              <strong>Expected CSV Headers:</strong> <code>product_code, name, category, height, width, length, weight, quantity</code>
+            </p>
+            <p style={{ fontSize: '11px', color: '#6b7280' }}>
+              Example row: <code>880909, Wireless Earbuds, Electronics, 5, 8, 10, 0.2, 50</code>
+            </p>
+          </div>
+          
+          <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', userSelect: 'none' }}>
+            <RefreshCw size={16} className={uploading ? 'spin' : ''} style={uploading ? { animation: 'spin 1s linear infinite' } : {}} />
+            <span>{uploading ? 'Processing File...' : 'Choose CSV File'}</span>
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={handleCSVUpload} 
+              style={{ display: 'none' }} 
+              disabled={uploading} 
+            />
+          </label>
         </div>
       </div>
     </div>
