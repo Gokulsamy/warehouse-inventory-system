@@ -1,4 +1,4 @@
-﻿import os
+import os
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -611,18 +611,28 @@ def upload_products_allocate(
                 detail="The uploaded file has no data rows. Please add at least one product row."
             )
 
-        # â”€â”€ Step 4: Load racks once â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Step 4: Load racks — auto-create defaults if none exist ──────
         racks = db.query(Rack).all()
         if not racks:
-            raise HTTPException(
-                status_code=400,
-                detail="No racks found in the warehouse. Please add racks before uploading products."
-            )
+            default_racks = [
+                Rack(code="R-A01", zone="Standard",  height=200, width=100, length=80,  max_weight=500,  total_volume=200*100*80),
+                Rack(code="R-A02", zone="Standard",  height=200, width=100, length=80,  max_weight=500,  total_volume=200*100*80),
+                Rack(code="R-B01", zone="Heavy",     height=150, width=120, length=100, max_weight=2000, total_volume=150*120*100),
+                Rack(code="R-B02", zone="Heavy",     height=150, width=120, length=100, max_weight=2000, total_volume=150*120*100),
+                Rack(code="R-C01", zone="Fragile",   height=180, width=90,  length=70,  max_weight=200,  total_volume=180*90*70),
+                Rack(code="R-C02", zone="Fragile",   height=180, width=90,  length=70,  max_weight=200,  total_volume=180*90*70),
+                Rack(code="R-D01", zone="Cold",      height=160, width=80,  length=60,  max_weight=300,  total_volume=160*80*60),
+                Rack(code="R-E01", zone="Upper",     height=100, width=100, length=80,  max_weight=150,  total_volume=100*100*80),
+            ]
+            for rack in default_racks:
+                db.add(rack)
+            db.flush()
+            racks = db.query(Rack).all()
 
         allocations_report = []
         products_allocated  = 0
 
-        # â”€â”€ Step 5: Process every row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Step 5: Process every row ──────────────────────────────────
         for index, row in enumerate(rows, start=1):
             # 5a. Empty value check for every required column
             for col in REQUIRED_COLUMNS:
