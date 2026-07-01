@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
-import { Plus, X, Layers, Weight, ArrowUpRight, CheckCircle, PackageOpen, HelpCircle } from 'lucide-react';
+import { Plus, X, Layers, Weight, ArrowUpRight, CheckCircle, PackageOpen, Trash2 } from 'lucide-react';
 
 export default function RacksGrid({ racks, onRefresh, userRole }) {
   const [selectedRack, setSelectedRack] = useState(null);
@@ -21,6 +21,21 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
 
   const [formError, setFormError] = useState(null);
   const [formSuccess, setFormSuccess] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  const handleDeleteRack = async (e, rack) => {
+    e.stopPropagation(); // prevent opening the drawer
+    if (!window.confirm(`Delete rack "${rack.code}"? This cannot be undone.`)) return;
+    setDeleteError(null);
+    try {
+      await api.deleteRack(rack.id);
+      if (selectedRack?.id === rack.id) setSelectedRack(null);
+      onRefresh();
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to delete rack.');
+      setTimeout(() => setDeleteError(null), 5000);
+    }
+  };
 
   useEffect(() => {
     if (selectedRack) {
@@ -98,6 +113,12 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
 
   return (
     <div style={styles.container}>
+      {/* Delete error toast */}
+      {deleteError && (
+        <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', padding: '12px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '13px' }}>
+          ❌ {deleteError}
+        </div>
+      )}
       {/* Top action row */}
       <div style={styles.actionsBar}>
         <div>
@@ -133,7 +154,27 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
               >
                 <div style={styles.rackCardHeader}>
                   <h3 style={styles.rackCodeText}>{rack.code}</h3>
-                  <span style={styles.badgeStyle(rack.zone)}>{rack.zone}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={styles.badgeStyle(rack.zone)}>{rack.zone}</span>
+                    {userRole === 'admin' && (
+                      <button
+                        onClick={(e) => handleDeleteRack(e, rack)}
+                        title="Delete Rack"
+                        style={{
+                          background: 'rgba(239,68,68,0.08)',
+                          border: '1px solid rgba(239,68,68,0.25)',
+                          color: '#f87171',
+                          borderRadius: '6px',
+                          padding: '3px 6px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div style={styles.statMetricRow}>

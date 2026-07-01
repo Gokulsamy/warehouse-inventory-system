@@ -107,6 +107,14 @@ export const api = {
     return handleResponse(res);
   },
 
+  // Delete a rack (only if empty)
+  async deleteRack(rackId) {
+    const res = await fetch(`${API_BASE_URL}/racks/${rackId}`, {
+      method: 'DELETE'
+    });
+    return handleResponse(res);
+  },
+
   // Authenticate user credentials
   async login(username, password) {
     const res = await fetch(`${API_BASE_URL}/auth/login`, {

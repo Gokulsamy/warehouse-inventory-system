@@ -201,7 +201,24 @@ def create_rack(rack_in: RackCreate, db: Session = Depends(get_db)):
     db.refresh(new_rack)
     return new_rack
 
-# ----------------- Allocation and AI/ML API -----------------
+@app.delete("/api/v1/racks/{rack_id}")
+def delete_rack(rack_id: int, db: Session = Depends(get_db)):
+    rack = db.query(Rack).filter(Rack.id == rack_id).first()
+    if not rack:
+        raise HTTPException(status_code=404, detail="Rack not found.")
+    if rack.occupied_volume > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete rack '{rack.code}' — it still has stock allocated. Please remove all stock first."
+        )
+    # Delete related allocation history and movements before deleting rack
+    db.query(AllocationHistory).filter(AllocationHistory.rack_id == rack_id).delete()
+    db.query(StockMovement).filter(StockMovement.rack_id == rack_id).delete()
+    db.delete(rack)
+    db.commit()
+    return {"message": f"Rack '{rack.code}' deleted successfully."}
+
+
 
 @app.post("/api/v1/allocate", response_model=AllocationResult)
 def get_allocation_recommendations(req: AllocationRequest, db: Session = Depends(get_db)):
