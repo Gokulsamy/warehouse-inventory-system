@@ -115,6 +115,16 @@ export const api = {
     return handleResponse(res);
   },
 
+  // Update rack zone, dimensions, max weight
+  async updateRack(rackId, rackData) {
+    const res = await fetch(`${API_BASE_URL}/racks/${rackId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rackData)
+    });
+    return handleResponse(res);
+  },
+
   // Authenticate user credentials
   async login(username, password) {
     const res = await fetch(`${API_BASE_URL}/auth/login`, {

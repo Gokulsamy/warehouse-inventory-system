@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
-import { Plus, X, Layers, Weight, ArrowUpRight, CheckCircle, PackageOpen, Trash2 } from 'lucide-react';
+import { Plus, X, Layers, Weight, ArrowUpRight, CheckCircle, PackageOpen, Trash2, Pencil } from 'lucide-react';
 
 export default function RacksGrid({ racks, onRefresh, userRole }) {
   const [selectedRack, setSelectedRack] = useState(null);
@@ -22,6 +22,10 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
   const [formError, setFormError] = useState(null);
   const [formSuccess, setFormSuccess] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [editRack, setEditRack]       = useState(null); // rack being edited
+  const [editForm, setEditForm]       = useState({});
+  const [editError, setEditError]     = useState(null);
+  const [editSuccess, setEditSuccess] = useState(false);
 
   const handleDeleteRack = async (e, rack) => {
     e.stopPropagation(); // prevent opening the drawer
@@ -34,6 +38,34 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
     } catch (err) {
       setDeleteError(err.message || 'Failed to delete rack.');
       setTimeout(() => setDeleteError(null), 5000);
+    }
+  };
+
+  const openEditRack = (e, rack) => {
+    e.stopPropagation();
+    setEditRack(rack);
+    setEditForm({
+      code: rack.code,
+      zone: rack.zone,
+      max_weight: rack.max_weight,
+      height: rack.height,
+      width: rack.width,
+      length: rack.length,
+    });
+    setEditError(null);
+    setEditSuccess(false);
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    setEditError(null);
+    try {
+      await api.updateRack(editRack.id, editForm);
+      setEditSuccess(true);
+      onRefresh();
+      setTimeout(() => { setEditRack(null); setEditSuccess(false); }, 1200);
+    } catch (err) {
+      setEditError(err.message || 'Failed to update rack.');
     }
   };
 
@@ -156,6 +188,24 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
                   <h3 style={styles.rackCodeText}>{rack.code}</h3>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={styles.badgeStyle(rack.zone)}>{rack.zone}</span>
+                    {userRole === 'admin' && (
+                      <button
+                        onClick={(e) => openEditRack(e, rack)}
+                        title="Edit Rack"
+                        style={{
+                          background: 'rgba(99,102,241,0.08)',
+                          border: '1px solid rgba(99,102,241,0.25)',
+                          color: '#818cf8',
+                          borderRadius: '6px',
+                          padding: '3px 6px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    )}
                     {userRole === 'admin' && (
                       <button
                         onClick={(e) => handleDeleteRack(e, rack)}
@@ -418,6 +468,75 @@ export default function RacksGrid({ racks, onRefresh, userRole }) {
             </div>
           </div>
         )}
+
+        {/* Edit Rack Modal */}
+        {editRack && (
+          <div style={styles.modalOverlay} onClick={() => setEditRack(null)}>
+            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <h3 style={styles.modalTitle}>Edit Rack — {editRack.code}</h3>
+                <button onClick={() => setEditRack(null)} style={styles.closeBtn}><X size={20} /></button>
+              </div>
+              <div style={styles.divider} />
+
+              {editSuccess ? (
+                <div style={styles.successForm}>
+                  <CheckCircle size={36} color="#10b981" />
+                  <p style={{ marginTop: '10px', fontWeight: 'bold' }}>Rack updated successfully!</p>
+                </div>
+              ) : (
+                <form onSubmit={handleEditSubmit} style={styles.addRackForm}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>Safety Storage Zone</label>
+                    <select
+                      value={editForm.zone}
+                      onChange={(e) => setEditForm({ ...editForm, zone: e.target.value })}
+                      className="form-input"
+                    >
+                      <option value="Standard">Standard (General)</option>
+                      <option value="Heavy">Heavy (Heavy/Bottom Shelf)</option>
+                      <option value="Fragile">Fragile (Fragile/Middle Shelf)</option>
+                      <option value="Cold">Cold (Refrigerated)</option>
+                      <option value="Upper">Upper (Lightweight/Top Shelf)</option>
+                    </select>
+                  </div>
+
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>Max Weight Limit (kg)</label>
+                    <input
+                      type="number" min="1" required
+                      value={editForm.max_weight}
+                      onChange={(e) => setEditForm({ ...editForm, max_weight: parseFloat(e.target.value) || 1 })}
+                      className="form-input"
+                    />
+                  </div>
+
+                  <div style={styles.formGroup}>
+                    <label style={styles.formLabel}>Dimensions (H × W × L in cm)</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {['height', 'width', 'length'].map(dim => (
+                        <input
+                          key={dim} type="number" placeholder={dim.charAt(0).toUpperCase() + dim.slice(1)}
+                          min="1" required value={editForm[dim]}
+                          onChange={(e) => setEditForm({ ...editForm, [dim]: parseFloat(e.target.value) || 1 })}
+                          className="form-input"
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {editError && <div style={styles.errorAlert}>{editError}</div>}
+
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                    <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Save Changes</button>
+                    <button type="button" onClick={() => setEditRack(null)} className="btn btn-secondary">Cancel</button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

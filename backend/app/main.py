@@ -218,6 +218,20 @@ def delete_rack(rack_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": f"Rack '{rack.code}' deleted successfully."}
 
+@app.put("/api/v1/racks/{rack_id}")
+def update_rack(rack_id: int, rack_in: RackCreate, db: Session = Depends(get_db)):
+    rack = db.query(Rack).filter(Rack.id == rack_id).first()
+    if not rack:
+        raise HTTPException(status_code=404, detail="Rack not found.")
+    rack.zone       = rack_in.zone
+    rack.max_weight = rack_in.max_weight
+    rack.height     = rack_in.height
+    rack.width      = rack_in.width
+    rack.length     = rack_in.length
+    rack.total_volume = rack_in.height * rack_in.width * rack_in.length
+    db.commit()
+    db.refresh(rack)
+    return rack
 
 
 @app.post("/api/v1/allocate", response_model=AllocationResult)
